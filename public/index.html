@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ephemeral — end-to-end encrypted chat</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- SETUP -->
+  <div id="setup-screen">
+    <div class="setup-card">
+      <div class="setup-mark">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M12 2L4 6v6c0 5 3.4 8.6 8 10 4.6-1.4 8-5 8-10V6l-8-4z" stroke="#6FE7C8" stroke-width="1.5" stroke-linejoin="round"/><path d="M9 12l2 2 4-4" stroke="#6FE7C8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>EPHEMERAL</span>
+      </div>
+      <h1>Pick a handle to start</h1>
+      <p class="lede">Your browser generates a private key right now and keeps it in this browser only. The server never sees it — just your public key, so people can encrypt messages to you.</p>
+      <label class="field-label" for="username-input">Handle</label>
+      <input id="username-input" placeholder="e.g. river" autocomplete="off" spellcheck="false" maxlength="24">
+      <button class="setup-btn" id="setup-btn">Generate keys &amp; continue</button>
+      <div class="setup-msg" id="setup-msg"></div>
+      <div class="setup-foot" id="setup-foot">
+        Messages are end-to-end encrypted and permanently deleted from the server after 3 days.
+      </div>
+    </div>
+  </div>
+
+  <!-- MAIN APP -->
+  <div id="app-screen">
+    <div class="layout">
+      <div id="sidebar">
+        <div id="me-row">
+          <div id="me-identity">
+            <div class="avatar" id="me-avatar"></div>
+            <div style="min-width:0;">
+              <div id="me-name"></div>
+              <div id="me-sub">key ready · this device</div>
+            </div>
+          </div>
+          <button id="reset-btn" title="Forget identity on this device">reset</button>
+        </div>
+        <div id="new-chat-row">
+          <input id="new-chat-input" placeholder="Message someone's handle…" autocomplete="off" spellcheck="false">
+          <button id="new-chat-btn">Go</button>
+        </div>
+        <div id="bridge-hint" class="hidden"></div>
+        <div id="contacts"></div>
+        <div id="conn-status"></div>
+      </div>
+
+      <div id="chat-panel">
+        <div id="chat-empty">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 2L4 6v6c0 5 3.4 8.6 8 10 4.6-1.4 8-5 8-10V6l-8-4z" stroke="#5A6B72" stroke-width="1.4" stroke-linejoin="round"/></svg>
+          <p>Enter a handle on the left to start an encrypted conversation.</p>
+        </div>
+        <div id="chat-active">
+          <div id="chat-header">
+            <div id="chat-header-left">
+              <div class="avatar" id="peer-avatar"></div>
+              <div>
+                <div id="chat-peer-name"></div>
+                <div id="chat-lock-row">
+                  <svg viewBox="0 0 24 24" fill="none"><path d="M12 2L4 6v6c0 5 3.4 8.6 8 10 4.6-1.4 8-5 8-10V6l-8-4z" stroke="#6FE7C8" stroke-width="2" stroke-linejoin="round"/></svg>
+                  <span id="fingerprint" title="Safety number — verify this matches on both devices to confirm no one is intercepting your keys"></span>
+                </div>
+              </div>
+            </div>
+            <div id="expiry-badge">messages vanish after 3 days</div>
+          </div>
+          <div id="messages"></div>
+          <div id="compose-row">
+            <input id="compose-input" placeholder="Type an encrypted message…" autocomplete="off">
+            <button id="send-btn">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M22 2L11 13" stroke="#0A1210" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 2l-7 20-4-9-9-4 20-7z" stroke="#0A1210" stroke-width="2" stroke-linejoin="round"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

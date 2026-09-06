@@ -1,0 +1,25 @@
+{
+  "name": "ephemeral-chat-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Backend for Ephemeral - an end-to-end encrypted chat app with a 3-day message TTL and an optional WhatsApp bridge via Baileys.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.24",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^4.19.2",
+    "mongoose": "^8.24.4",
+    "pino": "^9.9.5",
+    "qrcode": "^1.5.4",
+    "qrcode-terminal": "^0.12.0",
+    "socket.io": "^4.8.3"
+  }
+}

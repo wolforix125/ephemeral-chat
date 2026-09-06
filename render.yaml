@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: ephemeral-chat
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install
+    startCommand: node index.js
+    envVars:
+      - key: MONGODB_URI
+        sync: false
+      - key: ENABLE_WHATSAPP
+        value: "false"
+      - key: WHATSAPP_BRIDGE_TARGET
+        sync: false
+      - key: WHATSAPP_APP_USERNAME
+        sync: false

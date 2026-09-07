@@ -44,7 +44,7 @@ async function startSession(key, mode, onMessage) {
     return existing;
   }
 
-  const entry = { sock: null, connectionState: "connecting", latestQrDataUrl: null, mode, onMessage };
+  const entry = { sock: null, connectionState: "connecting", latestQrDataUrl: null, mode, onMessage, ownNumber: null };
   sessions.set(key, entry);
 
   const baileys = require("@whiskeysockets/baileys");
@@ -76,6 +76,7 @@ async function startSession(key, mode, onMessage) {
     if (connection === "open") {
       entry.connectionState = "open";
       entry.latestQrDataUrl = null;
+      entry.ownNumber = String(sock.user?.id || "").split(":")[0].replace(/[^0-9]/g, "") || null;
       console.log(`[whatsapp:${key}] Linked and connected.`);
     }
     if (connection === "close") {
@@ -127,7 +128,7 @@ async function sendMessageTo(sessionKey, toNumber, text) {
 function getStatus(key) {
   const entry = sessions.get(key);
   if (!entry) return { state: "not_started" };
-  return { state: entry.connectionState };
+  return { state: entry.connectionState, ownNumber: entry.ownNumber };
 }
 
 function getQrDataUrl(key) {

@@ -4,47 +4,25 @@ Node/Express + Socket.io backend, MongoDB for storage (native 3-day TTL — mess
 delete themselves, no cleanup job needed), phone-number accounts you can use from
 multiple devices, and an optional per-user WhatsApp mirror bridge via Baileys.
 
-
-### Message retention
-Messages automatically expire after 36 hours. In the chat header, the optional **keep last 15** toggle changes the retention policy for the account: once enabled, each conversation keeps only its newest 15 messages and older encrypted message records are deleted server-side. Enabling it immediately prunes existing conversations to the newest 15 messages.
-
 ## How accounts work now (multi-device)
 
 1. **Sign in with your phone number.** You get a 6-digit code — delivered over
-   WhatsApp by the shared verifier bot (or directly in DEV_MODE for local testing).
+   WhatsApp by a shared "verifier" bot (see setup below), or in DEV_MODE, straight
+   to the screen for local testing.
 2. **New number → create an account:** pick a handle and a **recovery passphrase**.
-   Your browser generates the ECDH identity and wraps the private key with
-   PBKDF2 → AES-GCM before it is sent to the server.
-3. **Same number, new device → unlock:** after phone verification, the existing
-   encrypted key backup is downloaded and unlocked locally with the recovery
-   passphrase. The phone, PC and iPad therefore use the same handle and identity.
-4. **Handle approval:** if a verified phone tries to use an already-taken handle,
-   Ephemeral creates a 10-minute device-login request. Every trusted device for
-   that handle receives an approval notification containing the requesting device,
-   browser, OS, approximate network identity and a 6-digit confirmation code. The
-   owner can accept or decline. Only after approval does the new device receive
-   the encrypted key backup and continue to the passphrase unlock step.
-5. **The recovery passphrase is still the key backup protection.** The server never
-   receives the passphrase or plaintext private key. Losing the passphrase means
-   an unprepared new device cannot recover the encrypted history.
-
-### Presence and inbox previews
-
-While a user has an authenticated Socket.io connection open, they appear **online**.
-Presence is tracked per user, so having the app open on both a phone and PC still
-counts as one online account. The sidebar also shows the latest decrypted message
-preview beside each direct conversation and group; the server stores only the
-opaque encrypted message payload.
-
-### Group chats
-
-Groups support up to 50 members. When a group is created, the browser generates a
-random AES-GCM group key and encrypts/wraps that key separately for every member
-using their existing ECDH-derived pairwise key. Group messages are then encrypted
-with the group key before they reach the server. The server only stores the group
-metadata and ciphertext. Group membership management/removal and key rotation are
-not included in this first group implementation, so treat groups as an initial
-feature rather than a finished Signal-style group protocol.
+   Your browser generates your ECDH key pair right there; the private key is
+   encrypted with a key derived from your passphrase (PBKDF2 → AES-GCM) *before*
+   it's sent anywhere. The server stores that ciphertext, never the passphrase or
+   the plaintext key.
+3. **Same number, new device → unlock:** after the OTP confirms it's your phone,
+   the app downloads your encrypted key backup and asks for your passphrase to
+   decrypt it locally. Now that device has your real identity — same handle, same
+   conversations, no new "account".
+4. **This is a deliberate trade-off, not a corner cut:** the server proves phone
+   ownership via OTP, but a *separate* passphrase (never transmitted) is what
+   actually unlocks your key. If you lose the passphrase, there is no recovery —
+   that's what makes the backup genuinely encrypted rather than security theater.
+   Use a real passphrase, not "1234", and remember it.
 
 Once unlocked, a device stays signed in (session token + key in `localStorage`) the
 same way any app keeps you logged in — sign out from the sidebar to clear it.
@@ -83,7 +61,7 @@ free instance, same env vars (see `server/.env.example`).
 ### Free-tier reality check
 - Render's free web service spins down after ~15 min idle (20–50s cold start).
 - Atlas M0 is free forever, capped at 512MB — plenty, since messages self-delete
-  after 36 hours.
+  after 3 days.
 - There's still no admin panel or password recovery beyond what's described
   above — this is a personal project, not a production auth system.
 
@@ -130,7 +108,7 @@ after creating a new account). This is a **merged inbox**, not a single contact:
   it — same disclosed trade-off as the rest of the bridge.
 - Same ToS/ban risk as the verifier bot — use a number you can afford to lose.
 - Unlink anytime from the sidebar; the merged thread stops receiving new
-  messages (existing ones still expire after 36 hours like everything else).
+  messages (existing ones still expire after 3 days like everything else).
 
 ## Local development
 
@@ -162,6 +140,12 @@ ephemeral-chat/
   render.yaml
 ```
 
-### Presence and WhatsApp routing
-- Direct chats show online status and last-seen time. Last seen is updated when the user leaves their final active session.
-- WhatsApp replies are routed to the exact external phone number captured from the incoming WhatsApp message, rather than to a handle. WhatsApp itself provides transport encryption between its endpoints; the bridge is necessarily an endpoint and can see plaintext while relaying it.
+
+## New account and WhatsApp flow
+
+1. Enter a handle and recovery passphrase to create an account. **No phone verification is required for account creation.**
+2. Linking WhatsApp is optional.
+3. If WhatsApp is linked, scan the QR and Ephemeral sends a six-digit code to the account's own WhatsApp chat; enter that code to confirm and save the linked phone number.
+4. When two Ephemeral users have linked WhatsApp, messages sent in either their Ephemeral direct chat or their WhatsApp chat are mirrored to the other side. Incoming WhatsApp messages from a linked Ephemeral user are re-encrypted by the recipient's browser before being stored as the normal E2EE chat message.
+
+**WhatsApp security note:** WhatsApp itself provides end-to-end encrypted transport between WhatsApp endpoints, but the Baileys bridge is an endpoint. For an app message to be delivered through WhatsApp, the bridge must see the plaintext briefly so it can hand the message to WhatsApp. Normal Ephemeral messages remain encrypted at rest; this bridge does not provide Signal-level end-to-end encryption across the WhatsApp boundary.

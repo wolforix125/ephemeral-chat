@@ -18,74 +18,36 @@
         <span>EPHEMERAL</span>
       </div>
 
-      <!-- Step 1: phone -->
-      <div class="auth-step" id="step-phone">
-        <h1>Sign in with your phone</h1>
-        <p class="lede">One account, any device. We text a code to verify it's you — your private key itself never touches our server unencrypted.</p>
-        <label class="field-label" for="phone-input">Phone number (with country code)</label>
-        <input id="phone-input" placeholder="e.g. 15551234567" autocomplete="off" inputmode="tel" maxlength="16">
-        <button class="setup-btn" id="send-code-btn">Send verification code</button>
-        <div class="setup-msg" id="phone-msg"></div>
-      </div>
-
-      <!-- Step 2: code -->
-      <div class="auth-step hidden" id="step-code">
-        <h1>Enter the code</h1>
-        <p class="lede" id="code-lede">We sent a 6-digit code over WhatsApp.</p>
-        <label class="field-label" for="code-input">Verification code</label>
-        <input id="code-input" placeholder="123456" autocomplete="off" inputmode="numeric" maxlength="6">
-        <button class="setup-btn" id="verify-code-btn">Verify</button>
-        <div class="setup-msg" id="code-msg"></div>
-        <button class="link-btn" id="back-to-phone-btn">Use a different number</button>
-      </div>
-
-      <!-- Step 3a: new account - choose handle + passphrase -->
-      <div class="auth-step hidden" id="step-new-account">
-        <h1>Set up your account</h1>
-        <p class="lede">Pick a handle people will message you at, and a recovery passphrase.</p>
+      <!-- Step 1: handle -->
+      <div class="auth-step" id="step-handle">
+        <h1>Your handle</h1>
+        <p class="lede">Create your Ephemeral identity with a handle. No phone number is required to create an account.</p>
         <label class="field-label" for="handle-input">Handle</label>
         <input id="handle-input" placeholder="e.g. river" autocomplete="off" spellcheck="false" maxlength="24">
         <label class="field-label" style="margin-top:16px;" for="passphrase-input">Recovery passphrase</label>
         <input id="passphrase-input" type="password" placeholder="a strong, memorable phrase" autocomplete="new-password">
-        <div class="setup-foot warn">
-          This passphrase — not your phone — unlocks your account's private key on new devices. We never see it and can't recover it. Losing it means losing access to your message history on any device you haven't already unlocked. Write it down somewhere safe.
-        </div>
+        <div class="setup-foot warn">Your passphrase protects the encrypted copy of your private key. We never receive the passphrase itself.</div>
         <button class="setup-btn" id="create-account-btn">Create account</button>
-        <div class="setup-msg" id="new-account-msg"></div>
-        <div class="setup-foot">If that handle already exists, you can request access instead. One of the owner's trusted devices will be asked to approve or decline your request.</div>
+        <button class="link-btn" id="existing-account-btn">I already have this handle</button>
+        <div class="setup-msg" id="handle-msg"></div>
       </div>
 
-      <!-- Step 3a-extra: existing handle approval -->
-      <div class="auth-step hidden" id="step-handle-request">
-        <h1>Waiting for approval</h1>
-        <p class="lede">That handle already belongs to someone. A request has been sent to their trusted devices.</p>
-        <div class="request-card">
-          <div><span>Handle</span><b id="request-handle"></b></div>
-          <div><span>Request code</span><b id="request-code"></b></div>
-          <div><span>Device</span><b id="request-device"></b></div>
-        </div>
-        <div class="setup-foot warn">Only continue if the owner recognizes this request. The owner can decline it at any time.</div>
-        <div class="setup-msg" id="handle-request-msg"></div>
-        <button class="link-btn" id="cancel-handle-request-btn">Cancel</button>
-      </div>
-
-      <!-- Step 3b: existing account, new device - unlock with passphrase -->
+      <!-- Existing account: unlock this device -->
       <div class="auth-step hidden" id="step-unlock">
-        <h1>Unlock on this device</h1>
-        <p class="lede">Signed in as <b id="unlock-handle"></b>. Enter your recovery passphrase to bring your key to this device.</p>
+        <h1>Unlock your account</h1>
+        <p class="lede">Enter your recovery passphrase to unlock <b id="unlock-handle"></b> on this device.</p>
         <label class="field-label" for="unlock-passphrase-input">Recovery passphrase</label>
         <input id="unlock-passphrase-input" type="password" autocomplete="current-password">
         <button class="setup-btn" id="unlock-btn">Unlock</button>
         <div class="setup-msg" id="unlock-msg"></div>
+        <button class="link-btn" id="back-to-handle-btn">Back</button>
       </div>
 
-      <!-- Step 4: optional WhatsApp link prompt -->
+      <!-- Optional WhatsApp link -->
       <div class="auth-step hidden" id="step-whatsapp-prompt">
-        <h1>Link WhatsApp too?</h1>
-        <p class="lede">Anyone who messages your WhatsApp number will automatically show up as a live conversation here — no approval step per contact.</p>
-        <div class="setup-foot warn">
-          This uses an unofficial WhatsApp client and risks that number being limited or banned by WhatsApp. Once linked, every inbound message from anyone is mirrored into one merged thread in this app; there's no allow-list. You can unlink anytime from the sidebar.
-        </div>
+        <h1>Link WhatsApp?</h1>
+        <p class="lede">Optional. You can link your own WhatsApp account and have messages shared between Ephemeral and WhatsApp when both people have linked WhatsApp.</p>
+        <div class="setup-foot warn">Linking uses an unofficial WhatsApp Web client. WhatsApp may limit or ban accounts using automation. WhatsApp messages also pass through the bridge server, which must temporarily see plaintext to relay them.</div>
         <button class="setup-btn" id="link-whatsapp-yes-btn">Yes, link WhatsApp</button>
         <button class="setup-btn secondary" id="link-whatsapp-no-btn">Not now</button>
       </div>
@@ -96,9 +58,14 @@
   <div id="whatsapp-link-screen" class="hidden">
     <div class="setup-card">
       <h1>Scan to link WhatsApp</h1>
-      <p class="lede">Open WhatsApp on your phone → Settings → Linked devices → Link a device, and scan this code.</p>
+      <p class="lede">Open WhatsApp → Settings → Linked devices → Link a device, then scan this code. After it connects, we'll send a code to your own WhatsApp chat to confirm the number.</p>
       <div id="wa-qr-box"><div id="wa-qr-loading">generating QR…</div></div>
       <div class="setup-msg" id="wa-link-msg"></div>
+      <div id="wa-code-area" class="hidden">
+        <label class="field-label" for="wa-code-input">Code sent to your WhatsApp</label>
+        <input id="wa-code-input" placeholder="123456" inputmode="numeric" maxlength="6">
+        <button class="setup-btn" id="verify-wa-code-btn">Confirm WhatsApp</button>
+      </div>
       <button class="link-btn" id="skip-whatsapp-link-btn">Skip for now</button>
     </div>
   </div>
@@ -121,34 +88,12 @@
           <input id="new-chat-input" placeholder="Message someone's handle…" autocomplete="off" spellcheck="false">
           <button id="new-chat-btn">Go</button>
         </div>
-        <div id="group-row"><button id="new-group-btn">＋ New group</button><button id="login-requests-btn" class="hidden">🔐 Requests</button></div>
         <div id="bridge-hint" class="hidden"></div>
         <div id="contacts"></div>
         <div id="conn-status"></div>
       </div>
 
-      <div id="group-modal" class="hidden">
-        <div class="modal-card">
-          <h2>Create group</h2>
-          <p>Group messages are encrypted with a group key that is wrapped separately for each member.</p>
-          <label class="field-label" for="group-name-input">Group name</label>
-          <input id="group-name-input" placeholder="e.g. Engineering" maxlength="80">
-          <label class="field-label" for="group-members-input" style="margin-top:14px;">Member handles</label>
-          <input id="group-members-input" placeholder="alice, bob, charlie">
-          <div class="setup-msg" id="group-msg"></div>
-          <button class="setup-btn" id="create-group-confirm-btn">Create encrypted group</button>
-          <button class="link-btn" id="close-group-btn">Cancel</button>
-        </div>
-      </div>
-      <div id="login-requests-modal" class="hidden">
-        <div class="modal-card">
-          <h2>New device requests</h2>
-          <div id="login-requests-list"></div>
-          <button class="link-btn" id="close-login-requests-btn">Close</button>
-        </div>
-      </div>
-
-<div id="chat-panel">
+      <div id="chat-panel">
         <div id="chat-empty">
           <svg viewBox="0 0 24 24" fill="none"><path d="M12 2L4 6v6c0 5 3.4 8.6 8 10 4.6-1.4 8-5 8-10V6l-8-4z" stroke="#5A6B72" stroke-width="1.4" stroke-linejoin="round"/></svg>
           <p>Enter a handle on the left to start an encrypted conversation.</p>
@@ -159,21 +104,13 @@
               <div class="avatar" id="peer-avatar"></div>
               <div>
                 <div id="chat-peer-name"></div>
-                <div id="chat-peer-status"></div>
                 <div id="chat-lock-row">
                   <svg viewBox="0 0 24 24" fill="none"><path d="M12 2L4 6v6c0 5 3.4 8.6 8 10 4.6-1.4 8-5 8-10V6l-8-4z" stroke="#6FE7C8" stroke-width="2" stroke-linejoin="round"/></svg>
                   <span id="fingerprint" title="Safety number — verify this matches on both devices to confirm no one is intercepting your keys"></span>
                 </div>
               </div>
             </div>
-            <div id="retention-controls">
-              <span id="retention-toggle-label">36h retention</span>
-              <label class="switch" title="Delete older messages once a conversation reaches 15 messages">
-                <input id="delete-after-15-toggle" type="checkbox" aria-label="Keep only the last 15 messages">
-                <span class="slider"></span>
-              </label>
-              <div id="expiry-badge">messages vanish after 36 hours</div>
-            </div>
+            <div id="expiry-badge">messages vanish after 3 days</div>
           </div>
           <div id="merged-inbox-warning" class="hidden">⚠ Merged WhatsApp inbox — anyone who texts your linked number appears here automatically. Replies go to whoever messaged most recently.</div>
           <div id="messages"></div>

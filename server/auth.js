@@ -48,7 +48,8 @@ async function registerAuthRoutes(app) {
     if (!handle) return res.status(400).json({ error: "enter your handle" });
     const account = await User.findOne({ username: handle }).select("username publicKey encryptedPrivateKey ivBackup saltBackup").lean();
     if (!account) return res.status(404).json({ error: "handle not found" });
-    res.json({ ok: true, handle: account.username, publicKey: account.publicKey, encryptedPrivateKey: account.encryptedPrivateKey, iv: account.ivBackup, salt: account.salt });
+    const sessionToken = signSession({ handle: account.username });
+    res.json({ ok: true, sessionToken, handle: account.username, publicKey: account.publicKey, encryptedPrivateKey: account.encryptedPrivateKey, iv: account.ivBackup, salt: account.saltBackup });
   });
 }
 

@@ -11,6 +11,7 @@ const { webcrypto } = require("crypto");
 const User = require("./models/User");
 const Message = require("./models/Message");
 const BridgeLink = require("./models/BridgeLink");
+const Group = require("./models/Group");
 const whatsapp = require("./whatsapp");
 const { registerAuthRoutes, requireAuth, verifySession } = require("./auth");
 
@@ -160,6 +161,36 @@ app.get("/api/messages/:peer", requireAuth, async (req, res) => {
   res.json(msgs.map(m => ({ id: m._id, from: m.from, to: m.to, iv: m.iv, ciphertext: m.ciphertext, ts: m.createdAt.getTime(), meta: m.meta })));
 });
 
+// ---------- REST API: group chats ----------
+app.post("/api/groups", requireAuth, async (req, res) => {
+  const me = req.auth.handle;
+  const name = String(req.body?.name || "").trim().slice(0, 80);
+  const wrappedKeys = Array.isArray(req.body?.wrappedKeys) ? req.body.wrappedKeys : [];
+  if (!name || wrappedKeys.length === 0) return res.status(400).json({ error: "group needs a name and at least one member" });
+  const members = [...new Set(wrappedKeys.map(w => sanitizeHandle(w.username)))];
+  if (!members.includes(me)) return res.status(400).json({ error: "you must include yourself as a member" });
+  for (const w of wrappedKeys) {
+    if (!w.username || !w.iv || !w.ciphertext) return res.status(400).json({ error: "malformed wrapped key" });
+  }
+  const group = await Group.create({ name, owner: me, members, wrappedKeys });
+  res.json({ ok: true, id: group._id, name: group.name, members: group.members });
+});
+
+app.get("/api/groups", requireAuth, async (req, res) => {
+  const groups = await Group.find({ members: req.auth.handle }).lean();
+  res.json(groups.map(g => ({
+    id: g._id, name: g.name, owner: g.owner, members: g.members,
+    myWrappedKey: g.wrappedKeys.find(w => w.username === req.auth.handle) || null
+  })));
+});
+
+app.get("/api/groups/:id/messages", requireAuth, async (req, res) => {
+  const group = await Group.findById(req.params.id).lean().catch(() => null);
+  if (!group || !group.members.includes(req.auth.handle)) return res.status(404).json({ error: "group not found" });
+  const msgs = await Message.find({ groupId: req.params.id }).sort({ createdAt: 1 }).lean();
+  res.json(msgs.map(m => ({ id: m._id, from: m.from, groupId: m.groupId, iv: m.iv, ciphertext: m.ciphertext, ts: m.createdAt.getTime() })));
+});
+
 // ---------- REST API: WhatsApp linking (self-service, merged inbox) ----------
 // A short code sent to the linked account's own WhatsApp chat proves the linked number.
 const whatsappLinkCodes = new Map(); // handle -> { code, expiresAt }
@@ -255,7 +286,18 @@ io.on("connection", (socket) => {
     ack && ack({ ok: true });
   });
 
-  socket.on("message:send", async ({ to, iv, ciphertext, viaWhatsApp = false }, ack) => {
+  socket.on("group:send", async ({ groupId, iv, ciphertext }, ack) => {
+    const from = socket.data.username;
+    if (!from || !groupId || !iv || !ciphertext) return ack && ack({ ok: false, error: "sign in required" });
+    const group = await Group.findById(groupId).lean().catch(() => null);
+    if (!group || !group.members.includes(from)) return ack && ack({ ok: false, error: "not a member of this group" });
+    const doc = await Message.create({ conversationId: `group:${groupId}`, from, groupId, iv, ciphertext });
+    const payload = { id: doc._id, from, groupId, iv, ciphertext, ts: doc.createdAt.getTime() };
+    for (const member of group.members) io.to(member).emit("group:message:new", payload);
+    ack && ack({ ok: true });
+  });
+
+  socket.on("message:send", async ({ to, iv, ciphertext, viaWhatsApp = false, relay }, ack) => {
     const from = socket.data.username;
     const toClean = sanitizeHandle(to);
     if (!from || !toClean || !iv || !ciphertext) return ack && ack({ ok: false, error: "sign in required" });
@@ -277,15 +319,16 @@ io.on("connection", (socket) => {
           const text = await bridgeDecrypt(toClean, from, iv, ciphertext);
           await whatsapp.sendMessageTo(from, link.lastExternalSender, text);
         }
-      } else if (!viaWhatsApp && sender?.whatsappNumber) {
+      } else if (!viaWhatsApp && relay?.iv && relay?.ciphertext && sender?.whatsappNumber) {
         const recipient = await User.findOne({ username: toClean }).select("whatsappNumber").lean();
         if (recipient?.whatsappNumber) {
-          // The recipient's bridge identity is the endpoint that can decrypt
-          // the browser E2EE payload. Do NOT use the recipient's normal user
-          // name here: bridgeDecrypt expects the bridge handle's private key.
+          // `relay` is a SEPARATE ciphertext the client encrypted specifically
+          // for the recipient's bridge public key (same construction as the
+          // self-bridge path above). The main iv/ciphertext stays true E2EE
+          // for the recipient's real key and is never decryptable here.
           const recipientBridgeHandle = bridgeHandleFor(toClean);
           await ensureBridgeIdentity(recipientBridgeHandle, toClean);
-          const text = await bridgeDecrypt(recipientBridgeHandle, from, iv, ciphertext);
+          const text = await bridgeDecrypt(recipientBridgeHandle, from, relay.iv, relay.ciphertext);
           // The sender's linked WhatsApp session is the transport endpoint.
           // This makes app -> WhatsApp delivery symmetric with the inbound
           // WhatsApp -> app path handled by onMirrorMessage().

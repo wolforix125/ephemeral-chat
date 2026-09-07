@@ -9,7 +9,8 @@ const THREE_DAYS_SECONDS = 60 * 60 * 24 * 3;
 const messageSchema = new mongoose.Schema({
   conversationId: { type: String, required: true, index: true }, // "alice|bob" (sorted)
   from: { type: String, required: true },
-  to: { type: String, required: true },
+  to: { type: String, default: null },
+  groupId: { type: String, default: null, index: true },
   iv: { type: String, required: true },
   ciphertext: { type: String, required: true },
   meta: {

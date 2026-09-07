@@ -280,7 +280,15 @@ io.on("connection", (socket) => {
       } else if (!viaWhatsApp && sender?.whatsappNumber) {
         const recipient = await User.findOne({ username: toClean }).select("whatsappNumber").lean();
         if (recipient?.whatsappNumber) {
-          const text = await bridgeDecrypt(toClean, from, iv, ciphertext);
+          // The recipient's bridge identity is the endpoint that can decrypt
+          // the browser E2EE payload. Do NOT use the recipient's normal user
+          // name here: bridgeDecrypt expects the bridge handle's private key.
+          const recipientBridgeHandle = bridgeHandleFor(toClean);
+          await ensureBridgeIdentity(recipientBridgeHandle, toClean);
+          const text = await bridgeDecrypt(recipientBridgeHandle, from, iv, ciphertext);
+          // The sender's linked WhatsApp session is the transport endpoint.
+          // This makes app -> WhatsApp delivery symmetric with the inbound
+          // WhatsApp -> app path handled by onMirrorMessage().
           await whatsapp.sendMessageTo(from, recipient.whatsappNumber, text);
         }
       }

@@ -1,17 +1,30 @@
 const mongoose = require("mongoose");
 
-// The server only ever stores a username and a PUBLIC key.
-// Private keys are generated and kept in the browser (localStorage) and
-// are never transmitted here. This is what makes the chat end-to-end
-// encrypted: the server can relay and store ciphertext, but has no key
-// that lets it read it (except for the special "whatsapp" bridge user -
-// see whatsapp.js - which is a real endpoint the server operates on your
-// behalf, the same way any bridge/bot participant in a chat can read
-// what's sent directly to it).
+// The server stores a PUBLIC key always, and - for real (non-bridge)
+// accounts - an ENCRYPTED backup of the private key so the same account
+// can be unlocked from other devices. That backup is wrapped client-side
+// with a key derived from a passphrase the server never sees (PBKDF2 ->
+// AES-GCM). The server can't decrypt encryptedPrivateKey; it's just
+// custody of ciphertext, the same trust model as the messages themselves.
 const userSchema = new mongoose.Schema({
   username: { type: String, required: true, unique: true, lowercase: true, trim: true, index: true },
+  phone: { type: String, unique: true, sparse: true, index: true }, // bridge pseudo-accounts have no phone
   publicKey: { type: Object, required: true }, // JWK
+
+  // Passphrase-wrapped private key backup (absent for bridge pseudo-accounts,
+  // whose private keys are held directly by the server - see index.js).
+  encryptedPrivateKey: { type: String },
+  ivBackup: { type: String },
+  saltBackup: { type: String },
+
   isBridge: { type: Boolean, default: false },
+  owner: { type: String, default: null }, // for isBridge users: the real handle that owns this bridge
+
+  // When enabled, each conversation keeps only its newest 15 messages.
+  // The server deletes older ciphertext records; plaintext is never stored here.
+  deleteAfter15Messages: { type: Boolean, default: false },
+
+  lastSeenAt: { type: Date, default: Date.now },
   createdAt: { type: Date, default: Date.now }
 });
 

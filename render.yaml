@@ -9,9 +9,9 @@ services:
     envVars:
       - key: MONGODB_URI
         sync: false
-      - key: ENABLE_WHATSAPP
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: ADMIN_TOKEN
+        sync: false
+      - key: DEV_MODE
         value: "false"
-      - key: WHATSAPP_BRIDGE_TARGET
-        sync: false
-      - key: WHATSAPP_APP_USERNAME
-        sync: false

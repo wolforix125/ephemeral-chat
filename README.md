@@ -1,138 +1,167 @@
 # Ephemeral — end-to-end encrypted chat, deployable for free
 
-A real, hosted version of the encrypted chat app: Node/Express + Socket.io backend,
-MongoDB for storage (with a native 3-day TTL so messages truly delete themselves),
-and an optional bridge to your personal WhatsApp via Baileys.
+Node/Express + Socket.io backend, MongoDB for storage (native 3-day TTL — messages
+delete themselves, no cleanup job needed), phone-number accounts you can use from
+multiple devices, and an optional per-user WhatsApp mirror bridge via Baileys.
 
-**Encryption model:** every browser generates an ECDH (P-256) key pair. Private
-keys never leave the browser (stored in `localStorage`). The server only ever
-stores public keys and opaque AES-GCM ciphertext — it cannot read your messages.
-The one exception is the optional WhatsApp bridge, explained below, which is a
-real participant the server operates on your behalf, not a silent reader of
-other people's chats.
+
+### Message retention
+Messages automatically expire after 36 hours. In the chat header, the optional **keep last 15** toggle changes the retention policy for the account: once enabled, each conversation keeps only its newest 15 messages and older encrypted message records are deleted server-side. Enabling it immediately prunes existing conversations to the newest 15 messages.
+
+## How accounts work now (multi-device)
+
+1. **Sign in with your phone number.** You get a 6-digit code — delivered over
+   WhatsApp by the shared verifier bot (or directly in DEV_MODE for local testing).
+2. **New number → create an account:** pick a handle and a **recovery passphrase**.
+   Your browser generates the ECDH identity and wraps the private key with
+   PBKDF2 → AES-GCM before it is sent to the server.
+3. **Same number, new device → unlock:** after phone verification, the existing
+   encrypted key backup is downloaded and unlocked locally with the recovery
+   passphrase. The phone, PC and iPad therefore use the same handle and identity.
+4. **Handle approval:** if a verified phone tries to use an already-taken handle,
+   Ephemeral creates a 10-minute device-login request. Every trusted device for
+   that handle receives an approval notification containing the requesting device,
+   browser, OS, approximate network identity and a 6-digit confirmation code. The
+   owner can accept or decline. Only after approval does the new device receive
+   the encrypted key backup and continue to the passphrase unlock step.
+5. **The recovery passphrase is still the key backup protection.** The server never
+   receives the passphrase or plaintext private key. Losing the passphrase means
+   an unprepared new device cannot recover the encrypted history.
+
+### Presence and inbox previews
+
+While a user has an authenticated Socket.io connection open, they appear **online**.
+Presence is tracked per user, so having the app open on both a phone and PC still
+counts as one online account. The sidebar also shows the latest decrypted message
+preview beside each direct conversation and group; the server stores only the
+opaque encrypted message payload.
+
+### Group chats
+
+Groups support up to 50 members. When a group is created, the browser generates a
+random AES-GCM group key and encrypts/wraps that key separately for every member
+using their existing ECDH-derived pairwise key. Group messages are then encrypted
+with the group key before they reach the server. The server only stores the group
+metadata and ciphertext. Group membership management/removal and key rotation are
+not included in this first group implementation, so treat groups as an initial
+feature rather than a finished Signal-style group protocol.
+
+Once unlocked, a device stays signed in (session token + key in `localStorage`) the
+same way any app keeps you logged in — sign out from the sidebar to clear it.
 
 ## What you need (all free)
 
-1. A [MongoDB Atlas](https://www.mongodb.com/cloud/atlas/register) account — free M0 cluster, no credit card required.
-2. A [Render](https://render.com) account — free Web Service tier.
-3. A [GitHub](https://github.com) account, to hold the repo Render deploys from.
-4. (Optional) A spare phone number with WhatsApp, if you want the bridge.
+1. [MongoDB Atlas](https://www.mongodb.com/cloud/atlas/register) — free M0 cluster.
+2. [Render](https://render.com) — free Web Service tier.
+3. [GitHub](https://github.com) — to hold the repo Render deploys from.
+4. A spare WhatsApp-enabled phone number for the verifier bot (see below) — **do
+   not use your primary number for this.**
 
-## 1. Get a database
+## 1. Database
 
-1. Create a free M0 cluster in Atlas.
-2. Under **Database Access**, add a user with a password.
-3. Under **Network Access**, add `0.0.0.0/0` (allow from anywhere) — Render's free tier has no fixed IP, so this is required unless you upgrade.
-4. Click **Connect → Drivers**, copy the connection string. It looks like:
-   `mongodb+srv://USER:PASSWORD@cluster0.xxxxx.mongodb.net/ephemeral-chat`
-   Add a database name at the end (e.g. `/ephemeral-chat`) if it isn't there already.
+Same as before: create the M0 cluster, add a DB user, allow `0.0.0.0/0` under
+Network Access (Render's free tier has no fixed IP), and copy the connection
+string into `MONGODB_URI`.
 
-## 2. Push this project to GitHub
+## 2. Push to GitHub, then deploy to Render
 
 ```bash
 cd ephemeral-chat
-git init
-git add .
-git commit -m "Ephemeral chat"
+git init && git add . && git commit -m "Ephemeral chat"
 git branch -M main
 git remote add origin https://github.com/<you>/ephemeral-chat.git
 git push -u origin main
 ```
 
-## 3. Deploy to Render
+In Render: **New → Blueprint**, point it at your repo (uses `render.yaml`), and
+fill in `MONGODB_URI` and `ADMIN_TOKEN` (any long random string — this protects
+the admin routes below). `SESSION_SECRET` is auto-generated by the blueprint.
 
-**Option A — Blueprint (fastest):** this repo includes `render.yaml`. In Render, click
-**New → Blueprint**, point it at your repo, and Render reads the file and creates the
-service for you. You'll be prompted for `MONGODB_URI`.
-
-**Option B — Manual:**
-1. **New → Web Service**, connect your repo.
-2. Root directory: `server`
-3. Build command: `npm install`
-4. Start command: `node index.js`
-5. Instance type: **Free**
-6. Add environment variables (see `server/.env.example`):
-   - `MONGODB_URI` — from step 1
-   - `ENABLE_WHATSAPP` — `false` to start
-7. Deploy. Render gives you a URL like `https://ephemeral-chat.onrender.com` — that's your live app.
-
-That's it — open the URL, pick a handle, and share it with someone else so they can
-register a handle too and you can message each other.
+Or deploy manually: root dir `server`, build `npm install`, start `node index.js`,
+free instance, same env vars (see `server/.env.example`).
 
 ### Free-tier reality check
-- Render's free web services **spin down after ~15 minutes idle** and take
-  20–50 seconds to wake back up on the next request. Fine for a personal project,
-  not for something you need always-on without a paid instance.
-- MongoDB Atlas M0 is free forever but capped at 512MB storage — plenty for
-  ciphertext that auto-deletes after 3 days.
-- There's no password/login system here — anyone who knows a handle exists
-  can message it, same trust model as the original demo. Don't use this for
-  anything sensitive without adding real authentication first.
+- Render's free web service spins down after ~15 min idle (20–50s cold start).
+- Atlas M0 is free forever, capped at 512MB — plenty, since messages self-delete
+  after 36 hours.
+- There's still no admin panel or password recovery beyond what's described
+  above — this is a personal project, not a production auth system.
 
-## 4. (Optional) Turn on the WhatsApp bridge
+## 3. Link the verifier bot (required for real phone login)
 
-This uses [Baileys](https://github.com/WhiskeySockets/Baileys), an **unofficial**,
-reverse-engineered WhatsApp Web client — not Meta's official API. Read this before
-enabling it:
+Phone login needs **one** shared WhatsApp bot account that sends codes on the
+app's behalf — this replaces a paid SMS API.
 
-- Automating a personal WhatsApp account this way is against WhatsApp's Terms
-  of Service. Accounts used this way have been rate-limited or banned. **Use a
-  spare number you can afford to lose, not your primary one.**
-- The compliant alternative is Meta's official **WhatsApp Business Platform
-  (Cloud API)**, which has a free testing tier but requires a Meta Business
-  account and app review. That's a different (larger) integration — ask if
-  you'd like that route built instead.
-- Once bridged, messages to/from WhatsApp are decrypted on the server so they
-  can be relayed as plaintext WhatsApp messages. That leg is **not** end-to-end
-  encrypted the way two in-app users are — the server necessarily holds the
-  bridge's private key, the same way any bot/bridge participant in a chat can
-  read what's sent directly to it. The app is upfront about this rather than
-  hiding it.
+1. With `ADMIN_TOKEN` set, call (from a browser or curl):
+   `POST https://your-app.onrender.com/api/admin/verifier/start?token=<ADMIN_TOKEN>`
+2. Open `GET .../api/admin/verifier/qr?token=<ADMIN_TOKEN>` in a browser — it
+   returns a QR image (or check the Render logs, which also print it as ASCII).
+3. On the **spare** phone: WhatsApp → Settings → Linked devices → Link a device,
+   scan it.
+4. Once linked, `/api/auth/request-code` starts actually texting codes. Sessions
+   persist in MongoDB (see `whatsappAuthMongo.js`), so this survives redeploys —
+   you shouldn't need to re-scan unless WhatsApp logs the bot out.
 
-To enable it:
+**No verifier bot linked yet?** Set `DEV_MODE=true` and codes are returned
+directly in the API response / server console — fine for testing, never for a
+real deployment (anyone could log in as anyone).
 
-1. In Render's environment variables, set:
-   - `ENABLE_WHATSAPP=true`
-   - `WHATSAPP_BRIDGE_TARGET=<phone in E.164 digits, no +>` — e.g. `15551234567`, the number you'll text with
-   - `WHATSAPP_APP_USERNAME=<your in-app handle>` — where incoming WhatsApp messages land
-2. Redeploy. Open the **Logs** tab in Render — a QR code prints there (or fetch
-   `https://your-app.onrender.com/api/whatsapp/qr` in a browser for an image version).
-3. On your phone: WhatsApp → **Settings → Linked devices → Link a device**, scan the QR.
-4. Once linked, message the in-app handle **`whatsapp`** from your account — it
-   relays to your phone over WhatsApp, and replies from that number show up
-   back in the app as messages from `whatsapp`.
+**Read this once:** Baileys is an unofficial, reverse-engineered WhatsApp Web
+client, not Meta's official API. Automating an account this way is against
+WhatsApp's Terms of Service, and numbers used this way have been rate-limited or
+banned. If the verifier bot gets banned, phone login breaks until you link a
+replacement number. The compliant alternative is Meta's official WhatsApp
+Business Platform (Cloud API), which needs business verification — a different,
+larger integration; ask if you'd like that instead.
 
-**Persistence caveat:** Baileys' login session is written to
-`server/data/whatsapp-auth/`. Render's free tier disk is not guaranteed to
-survive every redeploy, so you may need to re-scan the QR after deploying
-changes. If that gets annoying, the fix is to move that auth state into
-MongoDB too (same pattern already used for the bridge's encryption keypair
-in `server/index.js` — ask if you'd like that wired up) or move to a paid
-Render instance with a persistent disk.
+## 4. Linking your own WhatsApp (optional, per user)
+
+Any signed-in user can tap **"Link WhatsApp"** in the sidebar (also offered right
+after creating a new account). This is a **merged inbox**, not a single contact:
+
+- Once linked, **any** WhatsApp number that messages you shows up automatically
+  as a live conversation in the app — there's no approval step per contact. The
+  app shows a persistent warning in that thread for exactly this reason.
+- Replying from the app sends to **whoever texted most recently** — a merged
+  inbox has no single "peer" to address, so think of it as one shared line, not
+  separate per-contact chats.
+- The server necessarily decrypts messages on this leg to speak WhatsApp's
+  protocol (relaying plaintext), and re-encrypts what comes back before storing
+  it — same disclosed trade-off as the rest of the bridge.
+- Same ToS/ban risk as the verifier bot — use a number you can afford to lose.
+- Unlink anytime from the sidebar; the merged thread stops receiving new
+  messages (existing ones still expire after 36 hours like everything else).
 
 ## Local development
 
 ```bash
 cd server
-cp .env.example .env   # fill in MONGODB_URI
+cp .env.example .env   # fill in MONGODB_URI, SESSION_SECRET; set DEV_MODE=true
 npm install
 npm run dev
 ```
 
-Then open `http://localhost:3000`.
+Open `http://localhost:3000`. With `DEV_MODE=true` you can register/log in
+without a linked verifier bot — the code is shown right in the UI.
 
 ## Project layout
 
 ```
 ephemeral-chat/
   server/
-    index.js         Express + Socket.io + Mongo, REST + realtime relay
-    whatsapp.js       Baileys bridge (optional)
-    models/           User (handles + public keys), Message (TTL-indexed)
+    index.js              Express + Socket.io + Mongo, REST + realtime relay
+    auth.js                Phone/OTP verification, session tokens, account creation
+    whatsapp.js             Baileys session manager (verifier bot + per-user mirrors)
+    whatsappAuthMongo.js     Mongo-backed Baileys credential storage (survives redeploys)
+    models/                 User (handle+phone+key backup), Message (TTL), Otp (TTL), BridgeLink
     .env.example
   public/
-    index.html        UI shell
+    index.html               Auth steps (phone/code/passphrase/WhatsApp prompt) + chat UI
     styles.css
-    app.js             All client crypto + socket/rest logic (private keys live here, in localStorage)
-  render.yaml           Render Blueprint
+    app.js                    All client crypto (identity + passphrase key-wrap) + socket/rest logic
+  render.yaml
 ```
+
+### Presence and WhatsApp routing
+- Direct chats show online status and last-seen time. Last seen is updated when the user leaves their final active session.
+- WhatsApp replies are routed to the exact external phone number captured from the incoming WhatsApp message, rather than to a handle. WhatsApp itself provides transport encryption between its endpoints; the bridge is necessarily an endpoint and can see plaintext while relaying it.

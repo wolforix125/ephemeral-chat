@@ -1,70 +1,66 @@
 /**
- * Optional WhatsApp bridge, built on Baileys (@whiskeysockets/baileys).
+ * WhatsApp integration, built on Baileys (@whiskeysockets/baileys) - an
+ * unofficial, reverse-engineered WhatsApp Web client, not Meta's official
+ * API. Two kinds of sessions live here:
  *
- * IMPORTANT - read this before turning it on:
- *   - Baileys is an unofficial, reverse-engineered client for WhatsApp Web.
- *     It is not sanctioned by WhatsApp/Meta. Automating a personal WhatsApp
- *     account this way is against WhatsApp's Terms of Service, and accounts
- *     used this way have been rate-limited or banned. Use a spare/test
- *     number, not your main one, and treat this as a hobby-project bridge,
- *     not something to depend on.
+ *  1. The "verifier" - one shared bot account (linked once by whoever
+ *     deploys this, via /api/admin/verifier/qr) that sends account
+ *     verification codes over WhatsApp instead of paid SMS. Everyone's
+ *     phone-based login depends on this bot staying linked.
+ *
+ *  2. Per-user "mirror" sessions - each app user can link their own
+ *     WhatsApp account. Once linked, ANY inbound message from ANY contact
+ *     is mirrored into one merged thread in the app - there's no
+ *     allow-list. That's a deliberate, disclosed trade-off: convenient,
+ *     but it means your linked number is an open door in this app the
+ *     moment it's linked. The UI keeps a persistent warning about this
+ *     wherever that thread is shown.
+ *
+ * READ BEFORE LINKING ANYTHING:
+ *   - Automating a personal WhatsApp account this way is against
+ *     WhatsApp's Terms of Service. Numbers used this way have been
+ *     rate-limited or banned - use a number you can afford to lose,
+ *     never your only number, and definitely not for the verifier bot
+ *     that every user's login depends on.
  *   - The compliant alternative is Meta's official WhatsApp Business
- *     Platform (Cloud API), which has a free tier for testing but requires
- *     a Meta Business/App review process. This file does NOT implement
- *     that - it implements the Baileys route you asked for, because it
- *     needs no approval and works with a normal phone number.
- *   - Once a message is bridged to WhatsApp, it is no longer end-to-end
- *     encrypted the way two in-app users are. The server has to hold the
- *     private key for the "whatsapp" bridge identity so it can decrypt
- *     what's sent to it and relay plaintext to WhatsApp (and re-encrypt
- *     what comes back). That's disclosed in the UI - the bridge is a
- *     real, server-side participant, not a silent observer.
- *
- * Set ENABLE_WHATSAPP=true and WHATSAPP_BRIDGE_TARGET=<phone in E.164,
- * e.g. 15551234567> in your .env to use it.
+ *     Platform (Cloud API); ask if you'd like that built instead.
+ *   - The server necessarily sees plaintext for anything relayed to/from
+ *     WhatsApp - it has to, to speak WhatsApp's protocol. See index.js
+ *     for exactly how that's scoped.
  */
 
-const path = require("path");
-const fs = require("fs");
 const qrcode = require("qrcode");
 const qrcodeTerminal = require("qrcode-terminal");
 const pino = require("pino");
+const { useMongoAuthState, clearMongoAuthState } = require("./whatsappAuthMongo");
 
-let sock = null;
-let latestQrDataUrl = null;
-let connectionState = "not_started"; // not_started | connecting | qr | open | closed
-let onIncomingMessage = null; // (text) => void
-let bridgeTarget = null; // phone number, digits only, no +
+const VERIFIER_KEY = "__verifier__";
 
-const AUTH_DIR = path.join(__dirname, "data", "whatsapp-auth");
+const sessions = new Map(); // key -> { sock, connectionState, latestQrDataUrl, mode, onMessage }
 
-async function initWhatsApp({ target, onMessage }) {
-  bridgeTarget = String(target || "").replace(/[^\d]/g, "");
-  onIncomingMessage = onMessage;
-
-  if (!bridgeTarget) {
-    console.warn("[whatsapp] ENABLE_WHATSAPP is true but WHATSAPP_BRIDGE_TARGET is not set - skipping bridge startup.");
-    return;
+async function startSession(key, mode, onMessage) {
+  const existing = sessions.get(key);
+  if (existing && ["connecting", "qr", "open"].includes(existing.connectionState)) {
+    return existing;
   }
 
-  fs.mkdirSync(AUTH_DIR, { recursive: true });
+  const entry = { sock: null, connectionState: "connecting", latestQrDataUrl: null, mode, onMessage };
+  sessions.set(key, entry);
 
-  // Baileys is loaded lazily so the rest of the server works fine even if
-  // this package is missing or the bridge is disabled.
   const baileys = require("@whiskeysockets/baileys");
   const makeWASocket = baileys.default;
-  const { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = baileys;
+  const { DisconnectReason, fetchLatestBaileysVersion } = baileys;
 
-  const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+  const { state, saveCreds } = await useMongoAuthState(key);
   const { version } = await fetchLatestBaileysVersion();
 
-  connectionState = "connecting";
-  sock = makeWASocket({
+  const sock = makeWASocket({
     version,
     auth: state,
     logger: pino({ level: "warn" }),
     printQRInTerminal: false
   });
+  entry.sock = sock;
 
   sock.ev.on("creds.update", saveCreds);
 
@@ -72,66 +68,71 @@ async function initWhatsApp({ target, onMessage }) {
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
-      connectionState = "qr";
-      latestQrDataUrl = await qrcode.toDataURL(qr);
-      console.log("\n[whatsapp] Scan this QR code with WhatsApp > Linked devices (or open /api/whatsapp/qr in a browser):\n");
+      entry.connectionState = "qr";
+      entry.latestQrDataUrl = await qrcode.toDataURL(qr);
+      console.log(`\n[whatsapp:${key}] Scan this QR with WhatsApp > Linked devices:\n`);
       qrcodeTerminal.generate(qr, { small: true });
     }
-
     if (connection === "open") {
-      connectionState = "open";
-      latestQrDataUrl = null;
-      console.log("[whatsapp] Linked and connected.");
+      entry.connectionState = "open";
+      entry.latestQrDataUrl = null;
+      console.log(`[whatsapp:${key}] Linked and connected.`);
     }
-
     if (connection === "close") {
-      connectionState = "closed";
+      entry.connectionState = "closed";
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const loggedOut = statusCode === DisconnectReason.loggedOut;
-      console.log(`[whatsapp] Connection closed (loggedOut=${loggedOut}).`);
+      console.log(`[whatsapp:${key}] Connection closed (loggedOut=${loggedOut}).`);
       if (!loggedOut) {
-        // transient disconnect - try again
-        setTimeout(() => initWhatsApp({ target: bridgeTarget, onMessage: onIncomingMessage }), 4000);
+        setTimeout(() => startSession(key, mode, onMessage), 4000);
       } else {
-        console.log("[whatsapp] Logged out. Delete server/data/whatsapp-auth and restart to re-link.");
+        await clearMongoAuthState(key);
+        sessions.delete(key);
       }
     }
   });
 
-  sock.ev.on("messages.upsert", async ({ messages, type }) => {
-    if (type !== "notify") return;
-    for (const m of messages) {
-      if (m.key.fromMe) continue;
-      const senderJid = m.key.remoteJid || "";
-      const senderNumber = senderJid.split("@")[0];
-      if (senderNumber !== bridgeTarget) continue; // only relay the configured contact
-
-      const text =
-        m.message?.conversation ||
-        m.message?.extendedTextMessage?.text ||
-        m.message?.imageMessage?.caption ||
-        null;
-      if (text && onIncomingMessage) {
-        onIncomingMessage(text);
+  if (mode === "mirror") {
+    sock.ev.on("messages.upsert", async ({ messages, type }) => {
+      if (type !== "notify") return;
+      for (const m of messages) {
+        if (m.key.fromMe) continue;
+        const senderNumber = (m.key.remoteJid || "").split("@")[0];
+        if (!senderNumber || senderNumber.includes("@g.us")) continue; // skip groups/system
+        const text =
+          m.message?.conversation ||
+          m.message?.extendedTextMessage?.text ||
+          m.message?.imageMessage?.caption ||
+          null;
+        if (text && onMessage) onMessage(senderNumber, m.pushName || senderNumber, text);
       }
-    }
-  });
-}
-
-async function sendWhatsAppMessage(text) {
-  if (!sock || connectionState !== "open") {
-    throw new Error("WhatsApp bridge is not connected yet. Check /api/whatsapp/status.");
+    });
   }
-  const jid = `${bridgeTarget}@s.whatsapp.net`;
-  await sock.sendMessage(jid, { text });
+
+  return entry;
 }
 
-function getStatus() {
-  return { state: connectionState, target: bridgeTarget, hasQr: !!latestQrDataUrl };
+async function startVerifier() {
+  return startSession(VERIFIER_KEY, "verify-only", null);
 }
 
-function getQrDataUrl() {
-  return latestQrDataUrl;
+async function sendMessageTo(sessionKey, toNumber, text) {
+  const entry = sessions.get(sessionKey);
+  if (!entry || entry.connectionState !== "open") {
+    throw new Error(`WhatsApp session "${sessionKey}" is not connected.`);
+  }
+  await entry.sock.sendMessage(`${toNumber}@s.whatsapp.net`, { text });
 }
 
-module.exports = { initWhatsApp, sendWhatsAppMessage, getStatus, getQrDataUrl };
+function getStatus(key) {
+  const entry = sessions.get(key);
+  if (!entry) return { state: "not_started" };
+  return { state: entry.connectionState };
+}
+
+function getQrDataUrl(key) {
+  const entry = sessions.get(key);
+  return entry ? entry.latestQrDataUrl : null;
+}
+
+module.exports = { startSession, startVerifier, sendMessageTo, getStatus, getQrDataUrl, VERIFIER_KEY };
